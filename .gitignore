@@ -1,0 +1,24 @@
+# секреты
+.env
+
+# python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+
+# фронтенд
+node_modules/
+dist/
+
+# временные файлы Word
+~$*
+
+# данные docker, если тома лежат в папке проекта
+pgdata/
+qdrant_storage/
+ollama_data/
+
+# ОС и редактор
+.DS_Store
+.vscode/
