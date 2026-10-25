@@ -36,6 +36,8 @@ services:
     image: ollama/ollama:latest
     container_name: fintech-ollama
     restart: unless-stopped
+    environment:
+      OLLAMA_KEEP_ALIVE: 60m
     ports:
       - "127.0.0.1:${OLLAMA_PORT}:11434"
     volumes:
@@ -54,15 +56,17 @@ services:
     env_file:
       - .env
     environment:
+      TEMPLATES_DIR: /data/templates
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       QDRANT_URL: http://qdrant:6333
       OLLAMA_URL: http://ollama:11434
     ports:
-      - "${BACKEND_PORT}:8000"
+      - "127.0.0.1:${BACKEND_PORT}:8000"
     volumes:
       - ./backend:/app
       - ./data:/app/data
       - ./backend/scripts:/app/scripts
+      - ./data/templates:/data/templates:ro
     command: sh -c "pip install --no-cache-dir -r requirements.txt && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
 
     depends_on:

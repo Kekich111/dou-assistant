@@ -1,0 +1,371 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Помощник по Инструкции по ДОУ</title>
+<style>
+  :root{--bg:#f4f6fb;--card:#fff;--ink:#17233c;--muted:#5d6b85;--accent:#2f62c9;--line:#dbe2f0;--warn:#b4531a}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,"Segoe UI",Arial,sans-serif;display:flex;flex-direction:column;height:100vh}
+  header{background:var(--accent);color:#fff;padding:14px 20px}
+  header h1{margin:0;font-size:18px}
+  header p{margin:2px 0 0;font-size:13px;opacity:.85}
+  #log{flex:1;overflow-y:auto;padding:18px;max-width:900px;width:100%;margin:0 auto}
+  .msg{margin:0 0 14px;padding:12px 14px;border-radius:12px;max-width:85%;background:var(--card);border:1px solid var(--line)}
+  .msg.user{margin-left:auto;background:var(--accent);color:#fff;border-color:var(--accent)}
+  .msg.wait{color:var(--muted);font-style:italic}
+  .refuse{color:var(--warn);font-weight:600}
+  .hint{color:var(--muted);font-size:13px;margin-top:6px}
+  .sec{margin:12px 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);font-weight:700}
+  .src{border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;background:#fafbff}
+  .chap{color:var(--muted)}
+  .bar{height:6px;background:#e3e8f5;border-radius:3px;margin:6px 0 2px;overflow:hidden}
+  .fill{height:100%;background:var(--accent)}
+  .pct{font-size:12px;color:var(--muted)}
+  blockquote{margin:8px 0;padding:6px 10px;border-left:3px solid var(--accent);background:#eef2fc;font-size:14px}
+  details summary{cursor:pointer;color:var(--accent);font-size:13px}
+  details p{font-size:13px;margin:6px 0 0}
+  .visa{border:1px solid #bcd0f5;background:#f1f6ff;border-radius:10px;padding:10px 12px;margin-top:10px}
+  .vt{font-weight:600;margin-bottom:4px}
+  .visa ul{margin:6px 0;padding-left:20px}
+  .note{font-size:12px;color:var(--muted)}
+  .q{margin:10px 0 6px;font-weight:600}
+  .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:6px}
+  .btn,button.chip{display:inline-block;padding:7px 12px;border-radius:8px;border:1px solid var(--accent);background:var(--accent);color:#fff;text-decoration:none;font-size:14px;cursor:pointer;margin:6px 6px 0 0}
+  .btn.ghost,button.chip{background:#fff;color:var(--accent)}
+  .meta{margin-top:8px;font-size:12px;color:var(--muted)}
+  footer{background:var(--card);border-top:1px solid var(--line);padding:12px 18px}
+  .inner{max-width:900px;margin:0 auto}
+  .chips{margin-bottom:6px}
+  form{display:flex;gap:8px}
+  input{flex:1;padding:11px 12px;border:1px solid var(--line);border-radius:10px;font-size:15px}
+  form button{padding:0 20px;border:0;border-radius:10px;background:var(--accent);color:#fff;font-size:15px;cursor:pointer}
+  form button:disabled{opacity:.5;cursor:default}
+  .fillbox{margin-top:8px}
+  .fillbox .err{color:var(--warn);font-size:13px;margin-top:4px}
+  .fillbox .ex{color:var(--muted);font-size:13px;margin:2px 0 6px}
+  .sumrow{display:flex;gap:8px;font-size:14px;padding:3px 0;border-bottom:1px solid var(--line)}
+  .sumrow b{min-width:200px;font-weight:600}
+  .msg ol{padding-left:20px;margin:6px 0}
+  .msg li{margin-bottom:8px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Помощник по Инструкции по ДОУ</h1>
+  <p>Работает локально: модель и поиск без отправки данных в облако</p>
+</header>
+
+<div id="log"></div>
+
+<footer><div class="inner">
+  <div class="chips" id="chips"></div>
+  <form id="f">
+    <input id="inp" autocomplete="off" placeholder="Задайте вопрос по Инструкции…">
+    <button id="send">Отправить</button>
+  </form>
+</div></footer>
+
+<script>
+
+
+const API = "http://localhost:8000";
+const log = document.getElementById("log");
+const inp = document.getElementById("inp");
+const sendBtn = document.getElementById("send");
+let busy = false;
+
+const EXAMPLES = [
+  "Нужен приказ о вводе ИС в эксплуатацию",
+  "Нужно ли сопроводительное письмо к служебной записке?",
+  "Какой порядок и сроки согласования проекта нормативного документа?",
+  "Какой сегодня курс доллара?"
+];
+
+function el(tag, cls, text){
+  const e = document.createElement(tag);
+  if (cls) e.className = cls;
+  if (text !== undefined) e.textContent = text;
+  return e;
+}
+function scrollDown(){ log.scrollTop = log.scrollHeight; }
+function addUser(t){ log.appendChild(el("div","msg user",t)); scrollDown(); }
+function addBot(t, extra){
+  const m = el("div","msg bot"+(extra?" "+extra:""),t);
+  log.appendChild(m); scrollDown(); return m;
+}
+function setBusy(v){ busy = v; sendBtn.disabled = v; inp.disabled = v; if(!v) inp.focus(); }
+
+function srcCard(s){
+  const c = el("div","src");
+  const h = el("div");
+  h.appendChild(el("b",null,"п. "+s.point_no));
+  h.appendChild(el("span","chap"," · "+s.chapter));
+  c.appendChild(h);
+  const bar = el("div","bar"), fill = el("div","fill");
+  fill.style.width = Math.max(0, Math.min(100, s.relevance_percent)) + "%";
+  bar.appendChild(fill); c.appendChild(bar);
+  c.appendChild(el("div","pct","Релевантность: "+Math.round(s.relevance_percent)+"%"));
+  if (s.quote) c.appendChild(el("blockquote",null,s.quote));
+  const det = el("details");
+  det.appendChild(el("summary",null,"Полный текст пункта"));
+  det.appendChild(el("p",null,s.text));
+  c.appendChild(det);
+  return c;
+}
+
+function visaCard(v){
+  const c = el("div","visa");
+  c.appendChild(el("div","sec","Маршрут визирования по матрице"));
+  c.appendChild(el("div","vt",v.document_type));
+  const ul = el(v.route && v.route.length ? "ol" : "ul");
+  if (v.route && v.route.length) {
+    v.route.forEach(s => {
+      const li = el("li",null,s.title);
+      if (s.note) li.appendChild(el("div","note",s.note));
+      ul.appendChild(li);
+    });
+  } else {
+    (v.required_visas||[]).forEach(x => ul.appendChild(el("li",null,x)));
+    (v.additional_visas||[]).forEach(x =>
+      ul.appendChild(el("li",null,x.dept + (x.condition ? " (если: "+x.condition+")" : ""))));
+  }
+  c.appendChild(ul);
+  (v.matrix_notes||[]).forEach(n => c.appendChild(el("div","note",n)));
+  const tpls = (v.templates && v.templates.length)
+    ? v.templates
+    : (v.template_urls||[]).map((u,i) => ({title:"Шаблон "+(i+1), url:u}));
+  tpls.forEach(t => {
+    const a = el("a","btn","Скачать: "+t.title);
+    a.href = API+t.url; a.target = "_blank";
+    c.appendChild(a);
+  });
+  c.appendChild(el("div","q",v.next_question));
+  const row = el("div","row");
+  const b1 = el("button","btn ghost","Заполню сам");
+  b1.onclick = () => addBot("Скачайте шаблон выше и заполните его по Инструкции.");
+  const b2 = el("button","btn ghost","Вместе с ботом");
+  b2.onclick = () => {
+    const mod = (v.modules || [])[0];
+    if (!mod) { addBot("Для этого документа шаблон-модуль не найден."); return; }
+    fillStep(mod, {}, null, null);
+  };
+  row.appendChild(b1); row.appendChild(b2);
+  c.appendChild(row);
+  return c;
+}
+
+function render(d){
+  const box = el("div","msg bot");
+  box.appendChild(el("div", d.found ? "" : "refuse", d.answer));
+  if (!d.found) box.appendChild(el("div","hint",
+    "В материалах Инструкции ответа нет, поэтому бот ничего не выдумывает. Попробуйте переформулировать вопрос."));
+  if (d.clarify){
+    box.appendChild(el("div","q",d.clarify.question));
+    const row = el("div","row");
+    d.clarify.options.forEach(o => {
+      const b = el("button","chip",o.label);
+      b.onclick = () => ask(o.followup_message);
+      row.appendChild(b);
+    });
+    box.appendChild(row);
+  }
+  if (d.sources && d.sources.length){
+    box.appendChild(el("div","sec","Источники в Инструкции"));
+    d.sources.forEach(s => box.appendChild(srcCard(s)));
+  }
+  if (d.visa) box.appendChild(visaCard(d.visa));
+  box.appendChild(el("div","meta","Время обработки: "+(d.elapsed_ms/1000).toFixed(1)+" с"));
+  log.appendChild(box); scrollDown();
+}
+
+async function ask(text){
+  text = (text||"").trim();
+  if (!text || busy) return;
+  setBusy(true);
+  addUser(text);
+  const wait = addBot("Ищу в Инструкции… Модель работает локально на CPU, ответ может занять до 30 секунд.","wait");
+  try{
+    const r = await fetch(API+"/api/chat",{
+      method:"POST",
+      headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({message:text})
+    });
+    if (!r.ok) throw new Error("HTTP "+r.status);
+    const d = await r.json();
+    wait.remove();
+    render(d);
+  }catch(e){
+    wait.textContent = "Не удалось получить ответ ("+e.message+"). Проверьте, что backend запущен.";
+  }
+  setBusy(false);
+}
+
+async function fillStep(moduleId, answers, key, value, prevBox){
+  if (prevBox) prevBox.remove();
+  let d;
+  try{
+    const r = await fetch(API+"/api/fill/step",{
+      method:"POST", headers:{"Content-Type":"application/json"},
+      body: JSON.stringify({module_id:moduleId, answers, key, value})
+    });
+    if (r.status === 404){
+      addBot("Для этого документа диалоговое заполнение пока не готово. Скачайте шаблон выше и заполните его по примечаниям.");
+      return;
+    }
+    if (!r.ok) throw new Error("HTTP "+r.status);
+    d = await r.json();
+  }catch(e){ addBot("Не удалось продолжить диалог ("+e.message+")."); return; }
+
+  if (d.status === "done") return fillDone(moduleId, d);
+
+  const q = d.question;
+  const box = el("div","msg bot");
+  box.appendChild(el("div","sec","Вопрос "+(d.progress.done+1)+" из "+d.progress.total));
+  box.appendChild(el("div","q",q.question));
+  const fb = el("div","fillbox");
+  if (d.status === "invalid") fb.appendChild(el("div","err",d.error));
+
+  if (q.type === "choice"){
+    const row = el("div","row");
+    q.choices.forEach(c => {
+      const b = el("button","chip",c.label);
+      b.onclick = () => { addUser(c.label); fillStep(moduleId, d.answers, q.key, c.value, box); };
+      row.appendChild(b);
+    });
+    fb.appendChild(row);
+  } else {
+    if (q.example) fb.appendChild(el("div","ex","Например: "+q.example));
+    const row = el("div","row");
+    const input = el("input"); input.placeholder = q.type === "date" ? "ДД.ММ.ГГГГ" : "Ваш ответ…";
+    const send = () => {
+      const val = input.value.trim();
+      if (!val && !q.optional) return;
+      addUser(val || "(пропустить)");
+      fillStep(moduleId, d.answers, q.key, val, box);
+    };
+    input.addEventListener("keydown", e => { if (e.key === "Enter"){ e.preventDefault(); send(); } });
+    const ok = el("button","btn","Дальше"); ok.onclick = send;
+    row.appendChild(input); row.appendChild(ok);
+    if (q.optional){
+      const skip = el("button","btn ghost","Пропустить");
+      skip.onclick = () => { addUser("(пропустить)"); fillStep(moduleId, d.answers, q.key, "", box); };
+      row.appendChild(skip);
+    }
+    fb.appendChild(row);
+    setTimeout(() => input.focus(), 0);
+  }
+  box.appendChild(fb);
+  log.appendChild(box); scrollDown();
+}
+
+function fillDone(moduleId, d){
+  const box = el("div","msg bot");
+  box.appendChild(el("div",null,"Все данные собраны. Проверьте перед созданием документа:"));
+  d.summary.forEach(r => {
+    const row = el("div","sumrow");
+    row.appendChild(el("b",null,r.label)); row.appendChild(el("span",null,r.value));
+    box.appendChild(row);
+  });
+  (d.warnings||[]).forEach(w => box.appendChild(el("div","refuse","⚠ "+w)));
+  const dl = el("button","btn","Скачать готовый приказ (.docx)");
+  dl.onclick = async () => {
+    dl.disabled = true;
+    try{
+      const r = await fetch(API+"/api/fill/render",{
+        method:"POST", headers:{"Content-Type":"application/json"},
+        body: JSON.stringify({module_id:moduleId, answers:d.answers})
+      });
+      if (!r.ok) throw new Error("HTTP "+r.status);
+      const url = URL.createObjectURL(await r.blob());
+      const a = document.createElement("a"); a.href = url; a.download = "Приказ_о_вводе_в_эксплуатацию.docx";
+      a.click(); URL.revokeObjectURL(url);
+    }catch(e){ addBot("Не удалось создать документ ("+e.message+")."); }
+    dl.disabled = false;
+  };
+  box.appendChild(dl);
+  box.appendChild(el("div","hint","Перед подписанием проверьте текст и пройдите визирование по маршруту выше."));
+  log.appendChild(box); scrollDown();
+}
+
+const SEV = {error:["Исправить","#b4531a"], warn:["Проверить","#8a6d00"], info:["Рекомендация","#2f62c9"]};
+
+const fileInp = document.createElement("input");
+fileInp.type = "file"; fileInp.accept = ".docx"; fileInp.style.display = "none";
+document.body.appendChild(fileInp);
+fileInp.onchange = () => { if (fileInp.files[0]) checkFile(fileInp.files[0]); fileInp.value = ""; };
+
+async function checkFile(f){
+  addUser("📎 " + f.name);
+  const wait = addBot("Проверяю документ по модулю и Инструкции…","wait");
+  try{
+    const fd = new FormData(); fd.append("file", f);
+    const r = await fetch(API+"/api/check",{method:"POST", body: fd});
+    if (!r.ok){
+      let m = "HTTP "+r.status;
+      try{ m = (await r.json()).detail || m; }catch(_){}
+      throw new Error(m);
+    }
+    const d = await r.json();
+    wait.remove();
+    renderCheck(d);
+  }catch(e){ wait.textContent = "Не удалось проверить файл ("+e.message+")."; }
+}
+
+function refsLine(refs){
+  return (refs && refs.length) ? el("div","note","Основание: "+refs.join("; ")) : null;
+}
+
+function renderCheck(d){
+  const box = el("div","msg bot");
+  box.appendChild(el("div",null, d.module_title
+    ? "Документ распознан как: «"+d.module_title+"»."
+    : "Не удалось определить, на каком модуле основан документ, поэтому сверка с модулем не выполнена."));
+  const c = d.counts;
+  box.appendChild(el("div","q", c.error
+    ? "Нужно исправить: "+c.error+". К проверке: "+c.warn+". Рекомендаций: "+c.info+"."
+    : "Ошибок нет. К проверке: "+c.warn+". Рекомендаций: "+c.info+"."));
+  d.issues.forEach(i => {
+    const card = el("div","src");
+    const head = el("div");
+    const tag = el("b",null,SEV[i.severity][0]+": ");
+    tag.style.color = SEV[i.severity][1];
+    head.appendChild(tag); head.appendChild(el("span",null,i.title));
+    card.appendChild(head);
+    if (i.where) card.appendChild(el("blockquote",null,i.where));
+    if (i.detail) card.appendChild(el("div","hint",i.detail));
+    const r = refsLine(i.refs); if (r) card.appendChild(r);
+    box.appendChild(card);
+  });
+  box.appendChild(el("div","sec","Что делать дальше"));
+  const ol = el("ol");
+  d.steps.forEach(s => {
+    const li = el("li");
+    li.appendChild(el("b",null,s.title));
+    li.appendChild(el("div",null,s.detail));
+    const r = refsLine(s.refs); if (r) li.appendChild(r);
+    ol.appendChild(li);
+  });
+  box.appendChild(ol);
+  log.appendChild(box); scrollDown();
+}
+
+const attach = el("button","chip","📎 Проверить загруженный приказ");
+attach.onclick = () => fileInp.click();
+document.getElementById("chips").appendChild(attach);
+
+document.getElementById("f").addEventListener("submit", e => {
+  e.preventDefault();
+  const t = inp.value; inp.value = "";
+  ask(t);
+});
+EXAMPLES.forEach(t => {
+  const b = el("button","chip",t);
+  b.onclick = () => ask(t);
+  document.getElementById("chips").appendChild(b);
+});
+addBot("Здравствуйте! Задайте вопрос по Инструкции по ДОУ или выберите пример ниже. Я отвечаю только по тексту Инструкции и всегда указываю пункты.");
+</script>
+</body>
+</html>

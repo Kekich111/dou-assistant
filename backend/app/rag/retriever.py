@@ -175,6 +175,35 @@ class Retriever:
             ranked.append(hit)
         return ranked
 
+    def get_point(self, point_no: str, query: str) -> Hit | None:
+        """Активный пункт по номеру, с реальным косинусом к вопросу."""
+        vector = self.embed_query(query)
+        response = self._qdrant.query_points(
+            collection_name=self.collection,
+            query=vector,
+            query_filter=qm.Filter(
+                must=[
+                    qm.FieldCondition(key="is_active", match=qm.MatchValue(value=True)),
+                    qm.FieldCondition(key="point_no", match=qm.MatchValue(value=point_no)),
+                ]
+            ),
+            limit=1,
+            with_payload=True,
+        )
+        if not response.points:
+            return None
+        point = response.points[0]
+        payload = dict(point.payload or {})
+        return Hit(
+            id=str(point.id),
+            text=payload.get("text", ""),
+            chapter=payload.get("chapter", ""),
+            point_no=payload.get("point_no", ""),
+            version_id=payload.get("version_id", ""),
+            vector_score=float(point.score),
+            payload=payload,
+        )
+
     def close(self) -> None:
         self._http.close()
         self._qdrant.close()
@@ -199,7 +228,8 @@ def get_retriever() -> Retriever:
 def search(query: str, limit: int = 20, top_k: int = 5, rerank: bool = True) -> list[Hit]:
     return get_retriever().search(query, limit=limit, top_k=top_k, rerank=rerank)
 
-
+def get_point(point_no: str, query: str) -> Hit | None:
+    return get_retriever().get_point(point_no, query)
 # --------------------------------------------------------------------------- #
 # CLI
 # --------------------------------------------------------------------------- #
