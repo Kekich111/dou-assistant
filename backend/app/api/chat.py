@@ -135,6 +135,18 @@ _ANSWER_CACHE_MAX = 200
 def _cache_key(q: str) -> str:
     return " ".join(q.lower().split())
 
+_ANSWER_CACHE: dict[str, "ChatResponse"] = {}
+_ANSWER_CACHE_MAX = 200
+
+
+def _cache_key(q: str) -> str:
+    return " ".join(q.lower().split())
+
+
+def clear_answer_cache() -> None:
+    """Сбрасывается при смене активной версии Инструкции."""
+    _ANSWER_CACHE.clear()
+
 # Эндпоинт объявлен через def: поиск и вызов LLM синхронные, FastAPI выполнит
 # их в пуле потоков и не заблокирует event loop.
 @router.post("/chat", response_model=ChatResponse)
@@ -230,7 +242,10 @@ def chat(request: ChatRequest) -> ChatResponse:
     citations = list(result.citations)
     answer = result.answer
 
-    if result.found and citations and len(answer.split()) < 6:
+    if result.found and citations and (
+    len(answer.split()) < 6
+    or ("п." not in answer and quotes.get(citations[0]))
+):
         refs = ", ".join("п. " + c for c in citations)
         if visa:
             answer = f"Что нужно знать об этом документе, указано в {refs} Инструкции. Ниже маршрут визирования по Матрице и шаблон модуля."

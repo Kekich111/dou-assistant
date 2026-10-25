@@ -70,7 +70,7 @@
 <script>
 
 
-const API = "http://localhost:8000";
+const API = location.protocol === "file:" ? "http://localhost:8000" : "";
 const log = document.getElementById("log");
 const inp = document.getElementById("inp");
 const sendBtn = document.getElementById("send");

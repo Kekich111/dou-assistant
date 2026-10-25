@@ -1,0 +1,225 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Версии Инструкции — администрирование</title>
+<style>
+  :root{--bg:#f4f6fb;--card:#fff;--ink:#17233c;--muted:#5d6b85;--accent:#2f62c9;--line:#dbe2f0;--warn:#b4531a;--ok:#1d7a46;--okbg:#e6f5ec;--errbg:#fdeceb;--err:#a42a22}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,"Segoe UI",Arial,sans-serif}
+  header{background:var(--accent);color:#fff;padding:14px 20px}
+  header h1{margin:0;font-size:18px}
+  header p{margin:2px 0 0;font-size:13px;opacity:.85}
+  main{max-width:900px;margin:0 auto;padding:18px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-bottom:16px}
+  .card h2{margin:0 0 10px;font-size:16px}
+  label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
+  input[type=text],input[type=password]{width:100%;max-width:340px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;font:inherit}
+  input[type=file]{font:inherit;max-width:100%}
+  button{padding:8px 14px;border-radius:8px;border:1px solid var(--accent);background:var(--accent);color:#fff;font:inherit;font-size:14px;cursor:pointer}
+  button.ghost{background:#fff;color:var(--accent)}
+  button:disabled{opacity:.5;cursor:default}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  table{width:100%;border-collapse:collapse;font-size:14px}
+  th,td{text-align:left;padding:9px 8px;border-bottom:1px solid var(--line);vertical-align:middle}
+  th{font-size:12px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
+  .wrap{overflow-x:auto}
+  .badge{display:inline-block;padding:2px 9px;border-radius:999px;font-size:12px;font-weight:600}
+  .b-on{background:var(--okbg);color:var(--ok)}
+  .b-off{background:#eef0f6;color:var(--muted)}
+  .b-run{background:#fff4e0;color:#9a5b00}
+  .b-err{background:var(--errbg);color:var(--err)}
+  .msg{padding:9px 12px;border-radius:8px;font-size:14px;margin-bottom:12px}
+  .msg.ok{background:var(--okbg);color:var(--ok)}
+  .msg.err{background:var(--errbg);color:var(--err)}
+  .msg.info{background:#eef2fc;color:var(--ink)}
+  .hint{font-size:13px;color:var(--muted);margin-top:8px}
+  .empty{color:var(--muted);padding:10px 0}
+  code{background:#eef2fc;padding:1px 5px;border-radius:4px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Версии Инструкции</h1>
+  <p>Загрузка новой редакции и переключение активной версии. Бот отвечает только по активной.</p>
+</header>
+<main>
+  <div id="msg"></div>
+
+  <section class="card">
+    <h2>Доступ</h2>
+    <label for="token">Токен администратора (ADMIN_TOKEN)</label>
+    <div class="row">
+      <input type="password" id="token" autocomplete="off" placeholder="Токен из .env">
+      <button id="saveToken">Войти</button>
+    </div>
+    <div class="hint">Токен хранится только в этой вкладке и пропадает при её закрытии.</div>
+  </section>
+
+  <section class="card">
+    <div class="row" style="justify-content:space-between">
+      <h2 style="margin:0">Версии</h2>
+      <button class="ghost" id="refresh">Обновить</button>
+    </div>
+    <div class="wrap" id="list"><div class="empty">Введите токен, чтобы увидеть версии.</div></div>
+  </section>
+
+  <section class="card">
+    <h2>Загрузить новую редакцию</h2>
+    <label for="vid">Название версии</label>
+    <input type="text" id="vid" placeholder="например, v1.1" maxlength="32">
+    <label for="file">Файл Инструкции (.docx)</label>
+    <input type="file" id="file" accept=".docx">
+    <div class="row" style="margin-top:14px">
+      <button id="upload">Загрузить и проиндексировать</button>
+    </div>
+    <div class="hint">Индексация идёт в фоне, обычно меньше минуты. Пока она не закончится, статус «Идёт индексация»,
+      а после неё новая версия становится активной автоматически, старая остаётся в истории.</div>
+  </section>
+</main>
+
+<script>
+const API = location.protocol === "file:" ? "http://localhost:8000" : "";
+const $ = id => document.getElementById(id);
+let timer = null;
+
+function getToken(){ try{ return sessionStorage.getItem("admin_token") || ""; }catch(e){ return $("token").value; } }
+function setToken(v){ try{ sessionStorage.setItem("admin_token", v); }catch(e){} }
+
+function say(text, kind){
+  const box = $("msg"); box.textContent = "";
+  if(!text) return;
+  const d = document.createElement("div");
+  d.className = "msg " + (kind || "info"); d.textContent = text;
+  box.appendChild(d);
+}
+
+async function api(path, opts){
+  opts = opts || {};
+  opts.headers = Object.assign({"X-Admin-Token": getToken()}, opts.headers || {});
+  const r = await fetch(API + path, opts);
+  let data = null;
+  try{ data = await r.json(); }catch(e){}
+  if(!r.ok){
+    const detail = data && data.detail ? (typeof data.detail === "string" ? data.detail : JSON.stringify(data.detail)) : ("Ошибка " + r.status);
+    const err = new Error(r.status === 401 ? "Неверный токен" : detail);
+    err.status = r.status; throw err;
+  }
+  return data;
+}
+
+function fmt(iso){
+  if(!iso) return "—";
+  const d = new Date(iso);
+  return isNaN(d) ? iso : d.toLocaleString("ru-RU");
+}
+
+function cell(text){ const td = document.createElement("td"); td.textContent = text; return td; }
+function badge(text, cls){ const s = document.createElement("span"); s.className = "badge " + cls; s.textContent = text; return s; }
+
+function render(data){
+  const jobs = data.jobs || {};
+  const wrap = $("list"); wrap.textContent = "";
+  const versions = data.versions || [];
+  const shown = new Set(versions.map(v => v.version_id));
+  const table = document.createElement("table");
+  const head = document.createElement("tr");
+  ["Версия","Статус","Пунктов","Файл","Загружена",""].forEach(h => { const th = document.createElement("th"); th.textContent = h; head.appendChild(th); });
+  table.appendChild(head);
+
+  versions.forEach(v => {
+    const tr = document.createElement("tr");
+    const b = document.createElement("td"); b.style.fontWeight = "600"; b.textContent = v.version_id; tr.appendChild(b);
+    const st = document.createElement("td");
+    const job = jobs[v.version_id];
+    if(job && job.status === "running") st.appendChild(badge("Идёт индексация","b-run"));
+    else st.appendChild(v.is_active ? badge("Активна","b-on") : badge("В истории","b-off"));
+    tr.appendChild(st);
+    tr.appendChild(cell(String(v.points)));
+    tr.appendChild(cell(v.source_file || "—"));
+    tr.appendChild(cell(fmt(v.ingested_at)));
+    const act = document.createElement("td");
+    if(!v.is_active){
+      const btn = document.createElement("button"); btn.className = "ghost"; btn.textContent = "Сделать активной";
+      btn.onclick = () => activate(v.version_id);
+      act.appendChild(btn);
+    }
+    tr.appendChild(act);
+    table.appendChild(tr);
+  });
+
+  // версии, которые ещё индексируются или упали, но в индексе их пока нет
+  Object.keys(jobs).forEach(id => {
+    if(shown.has(id)) return;
+    const j = jobs[id];
+    if(j.status === "done") return;
+    const tr = document.createElement("tr");
+    const b = document.createElement("td"); b.style.fontWeight = "600"; b.textContent = id; tr.appendChild(b);
+    const st = document.createElement("td");
+    st.appendChild(j.status === "running" ? badge("Идёт индексация","b-run") : badge("Ошибка","b-err"));
+    tr.appendChild(st);
+    tr.appendChild(cell("—")); tr.appendChild(cell(j.filename || "—")); tr.appendChild(cell(fmt(j.started_at)));
+    tr.appendChild(cell(j.status === "error" ? (j.error || "") : ""));
+    table.appendChild(tr);
+  });
+
+  if(!versions.length && !Object.keys(jobs).length){
+    const e = document.createElement("div"); e.className = "empty"; e.textContent = "Версий пока нет."; wrap.appendChild(e); return;
+  }
+  wrap.appendChild(table);
+
+  const anyRunning = Object.values(jobs).some(j => j.status === "running");
+  schedule(anyRunning);
+}
+
+function schedule(on){
+  if(on && !timer){ timer = setInterval(load, 3000); }
+  if(!on && timer){ clearInterval(timer); timer = null; }
+}
+
+async function load(){
+  if(!getToken()){ return; }
+  try{
+    const data = await api("/api/admin/versions");
+    render(data);
+  }catch(e){
+    schedule(false);
+    say(e.message, "err");
+  }
+}
+
+async function activate(id){
+  if(!confirm("Сделать версию " + id + " активной? Бот будет отвечать по ней.")) return;
+  try{
+    await api("/api/admin/versions/" + encodeURIComponent(id) + "/activate", {method:"POST"});
+    say("Активная версия: " + id, "ok");
+    await load();
+  }catch(e){ say(e.message, "err"); }
+}
+
+async function upload(){
+  const id = $("vid").value.trim();
+  const f = $("file").files[0];
+  if(!id){ say("Укажите название версии, например v1.1", "err"); return; }
+  if(!f){ say("Выберите файл .docx", "err"); return; }
+  const btn = $("upload"); btn.disabled = true;
+  const fd = new FormData(); fd.append("file", f); fd.append("version_id", id);
+  try{
+    await api("/api/admin/versions", {method:"POST", body: fd});
+    say("Файл принят, идёт индексация версии " + id + ". Список обновится сам.", "info");
+    $("vid").value = ""; $("file").value = "";
+    await load();
+    schedule(true);
+  }catch(e){ say(e.message, "err"); }
+  finally{ btn.disabled = false; }
+}
+
+$("saveToken").onclick = () => { setToken($("token").value.trim()); say(""); load(); };
+$("token").addEventListener("keydown", e => { if(e.key === "Enter") $("saveToken").click(); });
+$("refresh").onclick = load;
+$("upload").onclick = upload;
+if(getToken()){ $("token").value = getToken(); load(); }
+</script>
+</body>
+</html>
