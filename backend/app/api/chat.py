@@ -15,6 +15,7 @@ from app.rules.clarify import clarify_block
 import logging
 import os
 import time
+import re
 
 import httpx
 from fastapi import APIRouter, HTTPException
@@ -148,11 +149,17 @@ def chat(request: ChatRequest) -> ChatResponse:
 
     clarify = clarify_block(request.message)
     if clarify:
-        visa = visa_block(request.message)
+        visa = None if clarify.get("force") else visa_block(request.message)
         if visa and visa.get("detected_by") == "semantic":
             return _doc_type_response(request.message, visa, started)
+        if clarify.get("no_sources"):
+            return ChatResponse(
+                answer=clarify["intro"], found=True, citations=[], sources=[],
+                top_score=0.0, elapsed_ms=int((time.perf_counter() - started) * 1000),
+                clarify=clarify,
+            )
         try:
-            hits = search(request.message, limit=SEARCH_LIMIT, rerank=False)
+            hits = list(search(request.message, limit=SEARCH_LIMIT, rerank=False))
         except Exception as exc:  # noqa: BLE001
             log.exception("Ошибка поиска в /api/chat (clarify)")
             raise HTTPException(status_code=503, detail="Сервис поиска временно недоступен") from exc
@@ -184,7 +191,16 @@ def chat(request: ChatRequest) -> ChatResponse:
         return _doc_type_response(request.message, visa, started)
 
     try:
-        hits = search(request.message, limit=SEARCH_LIMIT, rerank=False)
+        hits = list(search(request.message, limit=SEARCH_LIMIT, rerank=False))
+        if re.search(r"согласов|визир", request.message, re.I):
+            have = {h.point_no for h in hits}
+            forced = []
+            for no in ("10.3", "10.2"):
+                if no not in have:
+                    h = get_point(no, request.message)
+                    if h is not None:
+                        forced.append(h)
+            hits = forced + hits
         result = generate_answer(request.message, hits)
     except GenerationError as exc:
         log.error("Ошибка генерации: %s", exc)
@@ -218,6 +234,8 @@ def chat(request: ChatRequest) -> ChatResponse:
         refs = ", ".join("п. " + c for c in citations)
         if visa:
             answer = f"Что нужно знать об этом документе, указано в {refs} Инструкции. Ниже маршрут визирования по Матрице и шаблон модуля."
+        elif quotes.get(citations[0]):
+            answer = f"Согласно п. {citations[0]}: «{quotes[citations[0]].strip()}»"
         elif "п." not in answer:
             answer = f"Согласно п. {citations[0]}, {answer.rstrip('.').lower()}."
 

@@ -260,6 +260,16 @@ async function fillStep(moduleId, answers, key, value, prevBox){
   log.appendChild(box); scrollDown();
 }
 
+const DOC_TITLES = {
+  order_is_commissioning: "Приказ о вводе в эксплуатацию информационной системы",
+  order_responsible_docflow: "Приказ о назначении ответственных за делопроизводство",
+  order_handover: "Приказ о приёме и передаче дел и имущества",
+  order_local_act: "Приказ об утверждении и введении в действие локального акта",
+  decree_process_audit: "Распоряжение о проведении внутреннего аудита процессов",
+  decree_project_committee: "Распоряжение о создании проектного комитета",
+  decree_workgroup: "Распоряжение о создании рабочей группы"
+};
+
 function fillDone(moduleId, d){
   const box = el("div","msg bot");
   box.appendChild(el("div",null,"Все данные собраны. Проверьте перед созданием документа:"));
@@ -267,9 +277,9 @@ function fillDone(moduleId, d){
     const row = el("div","sumrow");
     row.appendChild(el("b",null,r.label)); row.appendChild(el("span",null,r.value));
     box.appendChild(row);
-  });
+  }); 
   (d.warnings||[]).forEach(w => box.appendChild(el("div","refuse","⚠ "+w)));
-  const dl = el("button","btn","Скачать готовый приказ (.docx)");
+  const dl = el("button","btn","Скачать готовый документ (.docx)");
   dl.onclick = async () => {
     dl.disabled = true;
     try{
@@ -279,7 +289,8 @@ function fillDone(moduleId, d){
       });
       if (!r.ok) throw new Error("HTTP "+r.status);
       const url = URL.createObjectURL(await r.blob());
-      const a = document.createElement("a"); a.href = url; a.download = "Приказ_о_вводе_в_эксплуатацию.docx";
+      const a = document.createElement("a"); a.href = url;
+      a.download = (DOC_TITLES[moduleId] || "Документ").replace(/\s+/g, "_") + ".docx";
       a.click(); URL.revokeObjectURL(url);
     }catch(e){ addBot("Не удалось создать документ ("+e.message+")."); }
     dl.disabled = false;

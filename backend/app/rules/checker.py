@@ -73,12 +73,22 @@ def _table_pars(doc) -> list[str]:
 def _to_regex(t: str) -> re.Pattern:
     if t in FREE_PARAGRAPHS:
         return re.compile(r".+")
-    tok = re.compile(r"_{3,}|И\. О\. Фамилия|([а-яё]+) / ([а-яё]+)")
+    tok = re.compile(
+        r"\[[^\]]*\]"                       # [необязательный фрагмент] и [проекту / проектам]
+        r"|_{3,}|И\. О\. Фамилия"
+        r"|([а-яё]+)\(([а-яё]+)\)"          # реализуемого(ых)
+        r"|([а-яё]+) / ([а-яё]+)"           # вариант без скобок
+    )
     parts, pos = [], 0
     for m in tok.finditer(t):
         parts.append(re.escape(t[pos:m.start()]))
-        if m.group(1):
-            parts.append(f"(?:{re.escape(m.group(1))}|{re.escape(m.group(2))})")
+        s = m.group(0)
+        if s.startswith("["):
+            parts.append(r".*?")
+        elif m.group(1):
+            parts.append(r"[а-яё]+")
+        elif m.group(3):
+            parts.append(f"(?:{re.escape(m.group(3))}|{re.escape(m.group(4))})")
         else:
             parts.append(r".+?")
         pos = m.end()
@@ -339,7 +349,7 @@ def next_steps(result: dict, visa: dict | None) -> list[dict]:
             steps.append({"title": "Проект отличается от модуля: нужно полное согласование",
                           "detail": "Если изменены постоянные формулировки, обязательные пункты или смысл решения, проект проходит полное согласование по главе 10 Инструкции.",
                           "refs": [f"{MR}, п. 1.3", f"{INS}, гл. 10"]})
-        else:
+        elif not result["counts"]["error"]:
             steps.append({"title": "Проект соответствует модулю",
                           "detail": "Подразделениям, согласовавшим модуль, повторное полное согласование не направляется. Лингвистическая экспертиза и визирование Департаментом ДОУ сохраняются.",
                           "refs": [f"{MR}, п. 1.3"]})

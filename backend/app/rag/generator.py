@@ -43,7 +43,7 @@ LLM_NUM_CTX = int(os.getenv("LLM_NUM_CTX", "4096"))
 LLM_TIMEOUT = 300.0          # CPU: первый вызов включает загрузку модели
 HTTP_ATTEMPTS = 2            # повторы при сетевых сбоях / битом JSON
 VERIFY_ATTEMPTS = 2          # попытки пройти проверку цитат и чисел
-MAX_CHUNK_CHARS = 1200
+MAX_CHUNK_CHARS = 2000
 MIN_QUOTE_CHARS = 15
 
 NO_INFO_MESSAGE = "В регламенте Организации нет информации по данному вопросу"
@@ -56,9 +56,11 @@ SYSTEM_PROMPT = """Ты — ассистент по Инструкции по д
 3. Если контекст не содержит ответа на вопрос, верни {"found": false, "answer": "", "evidence": []}.
 4. Ничего не выдумывай. Если пункт не содержит конкретного значения, о котором спрашивают (срока, числа, названия), НЕ подставляй его из других источников: скажи, что в пункте сказано на самом деле.
 5. Каждое число и срок в ответе должны дословно присутствовать в пунктах, на которые ты ссылаешься.
+5а. Не вычисляй новые даты и числа сам. Если спрашивают, что значит формулировка срока, объясни правило словами, без пересчёта дат. 
 6. В "evidence" для каждого пункта, на который опираешься, укажи его номер ("point", например "8.19.4") и короткую ДОСЛОВНУЮ цитату из этого пункта ("quote", от 15 до 60 символов: одна самая важная фраза), скопированную без изменений. Не более 2 пунктов.
 7. Отвечай по-русски ПОЛНЫМ предложением (до 30 слов): назови вывод и сошлись на пункт в формате «согласно п. 10.3». Ответ из одного слова или числа недопустим. Полный текст пункта пользователь увидит отдельно.
 7а. Если пункт содержит общее правило и исключение из него, назови сначала правило, затем исключение.
+7б. Если в вопросе просят объяснить проще («проще», «простыми словами», «объясни», «что это значит»), перескажи суть пункта обычными словами для сотрудника, без канцелярита, до 60 слов, короткими шагами («сначала…, затем…»). Числа и сроки сохраняй без изменений, ссылку «согласно п. X» оставляй. Цитата в evidence по-прежнему дословная.
 8. Твой ответ — один JSON-объект без другого текста:
 {"found": true|false, "answer": "текст ответа", "evidence": [{"point": "номер пункта", "quote": "дословная цитата"}]}
 Пример хорошего ответа (кратко, без пересказа пункта):
@@ -138,7 +140,7 @@ def _chat(messages: list[dict[str, str]]) -> tuple[dict, str]:
     payload = {
         "model": LLM_MODEL,
         "stream": False,
-        "keep_alive": "30m",
+        "keep_alive": "24h",
         "format": "json",
         "options": {"temperature": 0, "num_ctx": LLM_NUM_CTX, "num_predict": 400},
         "messages": messages,
@@ -203,10 +205,10 @@ def _numbers(text: str) -> set[str]:
     return {n.replace(",", ".") for n in _NUM_RE.findall(text or "")}
 
 
-def ungrounded_numbers(answer: str, source_text: str, known_points: set[str]) -> list[str]:
-    """Числа из ответа, которых нет в тексте источников (ссылки на пункты не считаются)."""
+def ungrounded_numbers(answer: str, source_text: str, known_points: set[str], extra: str = "") -> list[str]:
+    """Числа из ответа, которых нет в тексте источников и в самом вопросе (ссылки на пункты не считаются)."""
     cleaned = _POINT_REF_RE.sub(" ", answer)
-    allowed = _numbers(source_text) | known_points
+    allowed = _numbers(source_text) | known_points | _numbers(extra)
     return sorted(n for n in _numbers(cleaned) if n not in allowed)
 
 
@@ -241,7 +243,7 @@ def _best_sentence(text: str, probe: str, must_have: str | None = None, max_len:
     return best[:max_len]
 
 
-def _verify(data: dict, by_point: dict[str, "Hit"]) -> _Verdict:
+def _verify(data: dict, by_point: dict[str, "Hit"], query: str = "") -> _Verdict:
     answer = str(data.get("answer") or "").strip()
     if not bool(data.get("found")) or not answer:
         return _Verdict("refuse")
@@ -293,14 +295,14 @@ def _verify(data: dict, by_point: dict[str, "Hit"]) -> _Verdict:
     known = set(by_point)
     # Число есть в другом найденном пункте — добавляем его как источник (первым берётся
     # пункт с лучшим поиском: by_point хранится в порядке убывания cosine)
-    for n in ungrounded_numbers(answer, _sources_text(), known):
+    for n in ungrounded_numbers(answer, _sources_text(), known, query):
         for key, hit in by_point.items():
             if n in _numbers(hit.text) and not any(e.point_no == key for e in valid):
                 log.info("Guard: число %s подтверждено пунктом %s, ссылка добавлена", n, key)
                 valid.append(Evidence(point_no=key, quote=_best_sentence(hit.text, answer, must_have=n)))
                 break
 
-    still_bad = ungrounded_numbers(answer, _sources_text(), known)
+    still_bad = ungrounded_numbers(answer, _sources_text(), known, query)
     if still_bad:
         return _Verdict(
             "reject",
@@ -341,7 +343,7 @@ def generate_answer(query: str, hits: Sequence["Hit"]) -> GeneratedAnswer:
     # Слои 2-4: генерация + проверка (одна повторная попытка с указанием причины)
     for attempt in range(1, VERIFY_ATTEMPTS + 1):
         data, raw = _chat(messages)
-        verdict = _verify(data, by_point)
+        verdict = _verify(data, by_point, query)
 
         if verdict.status == "ok":
             return GeneratedAnswer(

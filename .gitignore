@@ -22,3 +22,6 @@ ollama_data/
 # ОС и редактор
 .DS_Store
 .vscode/
+
+data/templates/
+data/regulations

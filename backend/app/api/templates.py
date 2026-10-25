@@ -17,6 +17,8 @@ from fastapi import File, Form, UploadFile
 from app.rules import checker
 from app.rules.visas import route_for_module
 
+from urllib.parse import quote
+
 log = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api", tags=["templates"])
@@ -115,8 +117,10 @@ def fill_render(req: FillRenderRequest):
     if not path:
         raise HTTPException(status_code=404, detail="Шаблон не найден")
     data = fill.render(path, req.module_id, req.answers)
+    fname = _download_name(req.module_id)
+    disposition = f"attachment; filename=\"document.docx\"; filename*=UTF-8''{quote(fname)}"
     return Response(content=data, media_type=DOCX_MIME,
-                    headers={"Content-Disposition": 'attachment; filename="order.docx"'})
+                    headers={"Content-Disposition": disposition})
 
 MAX_UPLOAD = 5 * 1024 * 1024
 MODULE_TITLES = {
@@ -128,6 +132,10 @@ MODULE_TITLES = {
     "decree_project_committee": "Распоряжение о создании проектного комитета",
     "decree_workgroup": "Распоряжение о создании рабочей группы",
 }
+
+def _download_name(module_id: str) -> str:
+    title = MODULE_TITLES.get(module_id, "Документ")
+    return title.replace(" ", "_") + ".docx"
 
 
 @router.post("/check")
