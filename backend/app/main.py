@@ -5,7 +5,7 @@ from app.api import templates, versions
 from pathlib import Path
 from fastapi.responses import FileResponse
 
-app = FastAPI(title="Интеллектуальный помощник по ДОУ")
+app = FastAPI(title="Интеллектуальный помощник по ДОУ", docs_url=None, redoc_url=None)
 
 # Подключаем роутер с префиксом /api
 app.include_router(chat_router, tags=["Chat"])
